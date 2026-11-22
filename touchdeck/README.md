@@ -11,4 +11,8 @@ versions from the released `dependencies.lock` files (`pins/`). The workflow
 fails if a rebuilt lock differs from the released one.
 
 Workflow: `.github/workflows/touchdeck-p4-libs.yml`, runs on pushes to
-`touchdeck/**` branches. The combined archive is the `touchdeck-libs` artifact.
+`touchdeck/**` branches. Packages (artifact `touchdeck-libs`):
+
+- `esp32-core-3.3.8-libs-dsi.tar.xz`: the release plus the DSI fix.
+- `esp32-core-3.3.8-libs-dsi-psram250.tar.xz`: also PSRAM at 250 MHz for `esp32p4`
+  (chip rev 3 and newer; `esp32p4_es` stays at 200 MHz). Experimental.

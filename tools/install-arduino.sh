@@ -29,5 +29,7 @@ if [ "$AR_SOURCE_BRANCH" ]; then
 fi
 if [ $? -ne 0 ]; then exit 1; fi
 if [ -n "$AR_COMMIT" ]; then
+	# The commit may only be on a deleted branch: fetch it by hash.
+	git -C "$AR_COMPS/arduino" fetch origin "$AR_COMMIT" || exit 1
 	git -C "$AR_COMPS/arduino" checkout "$AR_COMMIT" || exit 1
 fi

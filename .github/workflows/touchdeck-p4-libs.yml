@@ -2,6 +2,7 @@ name: TouchDeck P4 libs
 
 # Arduino 3.3.8 libs with only the ESP32-P4 folders rebuilt from this branch
 # (CONFIG_LCD_DSI_ISR_CACHE_SAFE). Every other chip stays the released build.
+# Two packages: "dsi" and "dsi-psram250" (esp32p4 PSRAM at 250 MHz, rev >= 3 only).
 on:
   push:
     branches:
@@ -10,7 +11,6 @@ on:
 
 env:
   STOCK_URL: https://github.com/espressif/arduino-esp32/releases/download/3.3.8/esp32-core-3.3.8-libs.tar.xz
-  OUT_NAME: esp32-core-3.3.8-libs-p4dsi.tar.xz
   # Sources of the 3.3.8 libs (touchdeck/pins/versions-3.3.8.txt).
   IDF_BRANCH: release/v5.5
   IDF_TAG: v5.5.4
@@ -20,12 +20,15 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.target }} ${{ matrix.variant }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: [esp32p4, esp32p4_es]
+        include:
+          - { target: esp32p4, variant: base }
+          - { target: esp32p4_es, variant: base }
+          - { target: esp32p4, variant: psram250 }
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -38,6 +41,12 @@ jobs:
           ./tools/install-arduino.sh
           python3 touchdeck/pin_components.py pin touchdeck/pins/${{ matrix.target }}.dependencies.lock \
             main/idf_component.yml components/arduino/idf_component.yml
+
+      - name: PSRAM at 250 MHz
+        if: matrix.variant == 'psram250'
+        run: |
+          sed -i 's/^CONFIG_SPIRAM_SPEED_200M=y$/CONFIG_SPIRAM_SPEED_250M=y/' configs/defconfig.80m_200m configs/defconfig.40m_200m
+          grep -H SPIRAM_SPEED configs/defconfig.80m_200m configs/defconfig.40m_200m
 
       - name: Build
         run: |
@@ -54,12 +63,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: build-${{ matrix.target }}
+          name: build-${{ matrix.target }}-${{ matrix.variant }}
           path: build
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: libs-${{ matrix.target }}
+          name: libs-${{ matrix.target }}-${{ matrix.variant }}
           path: dist
 
   combine:
@@ -67,48 +76,26 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
       - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
         with:
           path: dist
           pattern: libs-*
-          merge-multiple: true
 
-      - name: Replace the P4 folders in the released package
+      - name: Build the packages
         run: |
           set -euo pipefail
-          mkdir stock new
           curl -sSLf "$STOCK_URL" -o stock.tar.xz
-          tar -xJf stock.tar.xz -C stock
-          # The archive may wrap everything in one top folder.
-          root=stock
-          if [ "$(ls stock | wc -l)" = 1 ] && [ -d "stock/$(ls stock)" ]; then root="stock/$(ls stock)"; fi
-          test -f "$root/package.json"
-          for f in dist/arduino-esp32-libs-esp32p4*.tar.gz; do tar -xzf "$f" -C new; done
-          for t in esp32p4 esp32p4_es; do
-            test -d "new/tools/esp32-arduino-libs/$t"
-            echo "::group::sdkconfig $t: released vs rebuilt"
-            diff "$root/$t/sdkconfig" "new/tools/esp32-arduino-libs/$t/sdkconfig" || true
-            echo "::endgroup::"
-            rm -rf "$root/$t"
-            cp -a "new/tools/esp32-arduino-libs/$t" "$root/$t"
-          done
-          python3 - "$root/package.json" <<'PY'
-          import json, sys
-          p = sys.argv[1]
-          d = json.load(open(p))
-          d["version"] += ".p4dsi1"
-          json.dump(d, open(p, "w"), indent=2)
-          print(d["version"])
-          PY
-          printf '\np4 rebuilt: %s %s (CONFIG_LCD_DSI_ISR_CACHE_SAFE)\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$root/versions.txt"
-          tar -cJf "$OUT_NAME" -C "$root" .
-          sha256sum "$OUT_NAME" | tee "$OUT_NAME.sha256"
-          ls -la "$OUT_NAME"
+          bash touchdeck/combine.sh stock.tar.xz dsi \
+            dist/libs-esp32p4-base dist/libs-esp32p4_es-base
+          bash touchdeck/combine.sh stock.tar.xz dsi-psram250 \
+            dist/libs-esp32p4-psram250 dist/libs-esp32p4_es-base
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: touchdeck-libs
           path: |
-            ${{ env.OUT_NAME }}
-            ${{ env.OUT_NAME }}.sha256
+            esp32-core-3.3.8-libs-*.tar.xz
+            esp32-core-3.3.8-libs-*.tar.xz.sha256
           compression-level: 0
