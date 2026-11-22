@@ -15,4 +15,5 @@ Workflow: `.github/workflows/touchdeck-p4-libs.yml`, runs on pushes to
 
 - `esp32-core-3.3.8-libs-dsi.tar.xz`: the release plus the DSI fix.
 - `esp32-core-3.3.8-libs-dsi-psram250.tar.xz`: also PSRAM at 250 MHz for `esp32p4`
-  (chip rev 3 and newer; `esp32p4_es` stays at 200 MHz). Experimental.
+  (chip rev 3 and newer; `esp32p4_es` stays at 200 MHz). Tested on a
+  Waveshare ESP32-P4 7" board: about 17 % faster PSRAM copies, no errors in a soak.
