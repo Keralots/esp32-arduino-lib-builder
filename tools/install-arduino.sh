@@ -28,3 +28,6 @@ if [ "$AR_SOURCE_BRANCH" ]; then
 	git -C "$AR_COMPS/arduino" pull --ff-only
 fi
 if [ $? -ne 0 ]; then exit 1; fi
+if [ -n "$AR_COMMIT" ]; then
+	git -C "$AR_COMPS/arduino" checkout "$AR_COMMIT" || exit 1
+fi

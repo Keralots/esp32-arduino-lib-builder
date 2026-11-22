@@ -1,0 +1,114 @@
+name: TouchDeck P4 libs
+
+# Arduino 3.3.8 libs with only the ESP32-P4 folders rebuilt from this branch
+# (CONFIG_LCD_DSI_ISR_CACHE_SAFE). Every other chip stays the released build.
+on:
+  push:
+    branches:
+      - "touchdeck/**"
+  workflow_dispatch:
+
+env:
+  STOCK_URL: https://github.com/espressif/arduino-esp32/releases/download/3.3.8/esp32-core-3.3.8-libs.tar.xz
+  OUT_NAME: esp32-core-3.3.8-libs-p4dsi.tar.xz
+  # Sources of the 3.3.8 libs (touchdeck/pins/versions-3.3.8.txt).
+  IDF_BRANCH: release/v5.5
+  IDF_TAG: v5.5.4
+  AR_SOURCE_BRANCH: master
+  AR_COMMIT: c6428be92c5eccb279511adf88c60f27cb2c338d
+  TINYUSB_COMMIT: eae25b531d
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32p4, esp32p4_es]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install dependencies
+        run: bash ./tools/prepare-ci.sh
+
+      - name: Fetch and pin sources
+        run: |
+          ./tools/update-components.sh
+          ./tools/install-arduino.sh
+          python3 touchdeck/pin_components.py pin touchdeck/pins/${{ matrix.target }}.dependencies.lock \
+            main/idf_component.yml components/arduino/idf_component.yml
+
+      - name: Build
+        run: |
+          source ./tools/install-esp-idf.sh
+          ./build.sh -s -e -t ${{ matrix.target }}
+
+      - name: Check component versions against the release
+        run: |
+          python3 touchdeck/pin_components.py check \
+            out/tools/esp32-arduino-libs/${{ matrix.target }}/dependencies.lock \
+            touchdeck/pins/${{ matrix.target }}.dependencies.lock
+
+      - name: Upload build on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-${{ matrix.target }}
+          path: build
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: libs-${{ matrix.target }}
+          path: dist
+
+  combine:
+    name: Combine with the released libs
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          path: dist
+          pattern: libs-*
+          merge-multiple: true
+
+      - name: Replace the P4 folders in the released package
+        run: |
+          set -euo pipefail
+          mkdir stock new
+          curl -sSLf "$STOCK_URL" -o stock.tar.xz
+          tar -xJf stock.tar.xz -C stock
+          # The archive may wrap everything in one top folder.
+          root=stock
+          if [ "$(ls stock | wc -l)" = 1 ] && [ -d "stock/$(ls stock)" ]; then root="stock/$(ls stock)"; fi
+          test -f "$root/package.json"
+          for f in dist/arduino-esp32-libs-esp32p4*.tar.gz; do tar -xzf "$f" -C new; done
+          for t in esp32p4 esp32p4_es; do
+            test -d "new/tools/esp32-arduino-libs/$t"
+            echo "::group::sdkconfig $t: released vs rebuilt"
+            diff "$root/$t/sdkconfig" "new/tools/esp32-arduino-libs/$t/sdkconfig" || true
+            echo "::endgroup::"
+            rm -rf "$root/$t"
+            cp -a "new/tools/esp32-arduino-libs/$t" "$root/$t"
+          done
+          python3 - "$root/package.json" <<'PY'
+          import json, sys
+          p = sys.argv[1]
+          d = json.load(open(p))
+          d["version"] += ".p4dsi1"
+          json.dump(d, open(p, "w"), indent=2)
+          print(d["version"])
+          PY
+          printf '\np4 rebuilt: %s %s (CONFIG_LCD_DSI_ISR_CACHE_SAFE)\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$root/versions.txt"
+          tar -cJf "$OUT_NAME" -C "$root" .
+          sha256sum "$OUT_NAME" | tee "$OUT_NAME.sha256"
+          ls -la "$OUT_NAME"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: touchdeck-libs
+          path: |
+            ${{ env.OUT_NAME }}
+            ${{ env.OUT_NAME }}.sha256
+          compression-level: 0

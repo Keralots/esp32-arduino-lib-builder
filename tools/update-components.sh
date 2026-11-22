@@ -15,3 +15,6 @@ else
     git -C "$TINYUSB_REPO_DIR" pull --ff-only
 fi
 if [ $? -ne 0 ]; then exit 1; fi
+if [ -n "$TINYUSB_COMMIT" ]; then
+    git -C "$TINYUSB_REPO_DIR" checkout "$TINYUSB_COMMIT" || exit 1
+fi
